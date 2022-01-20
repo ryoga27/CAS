@@ -1,0 +1,249 @@
+\documentclass[fleqn,uplatex]{jsarticle}
+\usepackage[top=30truemm,bottom=25truemm,left=25truemm,right=25truemm]{geometry}
+\usepackage{color}
+\usepackage{amsmath, amssymb}
+
+\usepackage[dvipdfmx,hiresbb]{graphicx}
+\usepackage{float}
+\usepackage{here}
+\usepackage[english]{babel}
+\usepackage{bm}
+
+\usepackage{hyperref}  
+\usepackage{url}
+
+\usepackage{latexsym}
+
+\usepackage{booktabs}
+
+
+\newtheorem{theo}{定理}[section]
+\newtheorem{defi}{定義}[section]
+\newtheorem{lemm}{補題}[section]
+\newtheorem{ex}{例}[section]
+\newtheorem{assume}{仮定}[section]
+\newtheorem{quiz}{問題}[section]
+
+\title{輪読資料 Computational Actuarial Science with R 13章}
+\date{2022-01-20}
+\author{小林凌雅}
+\begin{document}
+
+\maketitle
+
+\section*{13.3 データソース}
+
+EuStockMarkets：データセットは1991年から1998年のヨーロッパの主要株価指数の日次の終値から構成されています．
+\begin{itemize}
+    \item DAX（Ibis）：ドイツ
+    \item SMI：スイス
+    \item CAC：フランス
+    \item FTSE：イギリス
+\end{itemize}
+
+
+\section*{13.4 ポートフォリオ収益率と累積パフォーマンス}
+
+価格データを統計分布でモデル化できる数値に変換します．
+最も一般的な変換は，算術的収益率でもたらすことができ，時間 $t$ で次のように定義できます．
+\begin{align*}
+    r_t = \frac{P_t - P_{t-1}}{P_{t-1}} = \frac{P_t}{P_{t-1}} - 1
+\end{align*}
+ここで $P_t$ は時点 $t$ における金融商品の価格です．
+時点 $t$ の収益率に基づき，期間 $T$ にわたって日次収益率を集計したものが次のように書けます．
+\begin{align*}
+    r_t = \frac{P_T}{P_0} - 1 = \frac{P_T}{P_{T-1}} \frac{P_{T-1}}{P_{T-2}} \cdots \frac{P_1}{P_0} - 1 = \prod_{t=1}^T \frac{P_t}{P_{t-1}} - 1
+\end{align*}
+構成要素の値の合計である $W_t = \sum_i P_{i, t}$ に相当する時刻 $t$ のポートフォリオの収益（$W_t$）がある場合，時刻 $t$ のポートフォリオ収益率（$R_t$）は次のようになります．
+\begin{align*}
+    R_t 
+    &= \frac{1}{W_{t-1}}(W_t - W_{t-1}) \\
+    &= \frac{1}{W_{t-1}}\{(P_{1,t} + P_{2, t} + \cdots + P_{N, t}) - (P_{1,t-1} + P_{2, t-1} + \cdots + P_{N, t-1})\} \\
+    &= \frac{1}{W_{t-1}}\{(P_{1,t} - P_{1,t-1}) + (P_{2,t} - P_{2,t-1}) + \cdots + (P_{N,t} - P_{N,t-1})\} \\
+    &= \frac{1}{W_{t-1}}(P_{1, t-1} r_1 + P_{2, t-1} r_2 + \cdots + P_{N, t-1} r_N)
+\end{align*}
+したがって，ポートフォリオの収益率は，その構成要素の収益率をその配分で加重平均したものとなります．
+\begin{align*}
+    R_t = \sum_{i=1}^N \frac{P_{t-1}}{W_{t-1}} r_i = \sum_{i=1}^N w_i r_i
+\end{align*}
+資産収益率 $\bm r$ とポートフォリオの重み $\bm w$ があれば，時刻 $t$ の累積パフォーマンスを計算できる．
+\begin{align*}
+    W_t = W_0 \prod_{t=1}^T (1 + \bm x_t^\mathsf{T} \bm w)
+\end{align*}
+
+\subsection*{13.5 R でのポートフォリオ最適化}
+
+\subsubsection*{13.5.1 はじめに}
+
+ここでは，目標報酬と運用制約が与えられた場合のリスク尺度の最小化からなるポートフォリオ最適化の一般的な定式化を採用します．
+\begin{itemize}
+    \item リスク尺度がポートフォリオの共分散行列で表される平均分散ポートフォリオ
+    \item リスクを条件付きVaR
+    \item ドローダウン最小化
+\end{itemize}
+また，リスク尺度に加えて，ポートフォリオ最適化の重要な側面は，運用上または決定上の制約を反映した制約の定式化です．
+
+\begin{itemize}
+    \item 目標報酬：目標報酬制約 $\bar r$ は，$\mu^\mathsf{T} \bm w = \bar r$ に従って，各要素の重み $w$ と平均リターン $\mu$ によって得られます．
+    \item フルインベストメント：すべての資本をポートフォリオに投資しなければならないというものです．
+    \item ロングオンリー：これは株式を買うことしかできないことを指定します．
+    \item グループ制約：運用上の制約から派生したもので、ある商品クラスの株式を最低限保有することが義務付けられているものです．
+\end{itemize}
+
+\subsubsection*{13.5.2 平均分散ポートフォリオ}
+
+ロングのみ制約のある平均分散（MV）ポートフォリオの解を示します．
+Markowitz が 1953 年に MV ポートフォリオを発表し，現代のポートフォリオ最適化の道を切り開きました．
+最適化の目標は，一連の制約条件下でリターンとリスクの間の最適なトレードオフを決定することです．
+MV モデルでは、以下を仮定しています．
+\begin{itemize}
+    \item ポートフォリオはリスク資産と無リスク資産からなる
+    \item 商品の価格は外生的に与えられる
+    \item リスクテイカーである投資家は投資価格に影響しない
+    \item リターンは確率空間に楕円分布する確率過程、つまり共分散行列がある
+    \item 取引、税などのコストはない
+    \item すべての資産市場は流動的
+    \item 資産は無限に分割可能
+    \item 全投資
+\end{itemize}
+などです．
+Markowitz が開発したリスク指標は，資産加重共分散行列 $\bm w^\mathsf{T} \bm \Sigma \bm w$ であり，$\bm \Sigma$ は共分散行列，$\bm w$ はポートフォリオの重みです．
+最適解は，目標ポートフォリオリターン $\bar r$ とロングオンリーおよびフルインベストメントの条件を設定することにより以下のように得られる．
+\begin{align*}
+    \min_{\bm w} \     & \bm w^\mathsf{T} \bm \Sigma \bm w,  & \mbox{（共分散リスク）} \\
+    \mbox{subject to } & \bm w^\mathsf{T} \hat \mu = \bar x, & \mbox{（目標報酬）} \\
+                       & \bm w^\mathsf{T} \bm 1 = 1,         & \mbox{（フルインベストメント）} \\
+                       & \bm w \geq 0                        & \mbox{（ロングオンリー）}
+\end{align*}
+ここで $\hat \mu$ は資産の平均収益率のベクトルです．
+この問題は解析的に解くことができないため，解を得るためには最適化ツールが必要です．
+MVポートフォリオは二次計画問題（QP）として表現されます．
+
+\subsubsection*{13.5.3 頑健な平均分散ポートフォリオ}
+
+ポートフォリオモデルの欠点としてよく挙げられるのが，共分散行列を用いてリスクを推定することです．
+この問題は，標本共分散推定器が外れ値に敏感であることにあります．
+しかしながら，外れ値は金融データには頻繁に現れます．
+Rousseeuw \& Driessen (1999)で示された高速最小共分散行列法を実装した robustbase (Rousseeuw et al. (2012)) パッケージの covMcd() 関数を使用します．
+
+\subsubsection*{13.5.4 最小分散ポートフォリオ}
+
+MVポートフォリオモデルのもう１つの欠点として，平均収益率を使用することが挙げられています．
+この場合，最適化された重みは，平均の推定に影響を与える潜在的な外れ値によってもたらされる誤差のために，不適切なポートフォリオを生成する可能性があります．
+この点から，目標収益がない場合の最小分散ポートフォリオのみを検討することが考えられます．
+これは，ポートフォリオの制約条件から目標リターンの条件を削除することで簡単に実行できます．
+
+\subsubsection*{13.5.5 条件付きVaRのポートフォリオ}
+
+共分散行列に加えて、別のリスク尺度も導入されています．
+よく知られたリスク尺度の1つに、いわゆるVaR（Value-at-Risk）があります．
+VaRは，ポートフォリオの損失リスクを測定するために広く使用されており，所定の確率レベルに対して超過する可能性のある損失の閾値を定義しています．
+例えば，1000ドルのポートフォリオで5\%の VaR は、1000ドル以上の損失が発生する確率が0.05であることを示します．
+統計用語では，VaRはポートフォリオの分布の分位点の値に相当します．
+例えば，$P$ が $X$ の確率密度関数を示す場合，ポートフォリオの VaR は次のように与えられます．
+\begin{align*}
+    \mbox{VaR}_\alpha(L) = \inf \{l \in \mathbb R: P(l) > \alpha\}
+\end{align*}
+
+VaR の欠点は，VaR を超えたときに期待される最大損失に関する情報を一切与えないことです．
+これはとくに裾が厚い分布を示す可能性のある金融における収益率にとって重要です．
+VaR の修正として導入された条件付VaR（CVaR）は，VaRとVaRを超える損失の間の加重平均を取ることで構成されています．
+CVaR は，VaR を超過した条件下で損失の条件付き期待値です．
+CVaR は次のように定義できます．
+\begin{align*}
+    \mbox{CVaR}_\alpha = \frac{1}{1 - \beta} \int_{f(w, x)}^{\mbox{\footnotesize VaR}_\alpha(\beta)} f(w, x) p(w, x) dx
+\end{align*}
+ここで，$\mbox{VaR}_\alpha$ はバリュー・アット・リスク，$f(w,x)$ はポートフォリオ配分 $w$ とポートフォリオ構成要素の値に対して定義された損失関数，$p$ はウェイト $w$ のポートフォリオの確率分布です．
+VaRとは対照的に，CVaR は Artzner et al.(1999) が説明するように，コヒーレントリスク尺度です．
+コヒーレントリスク尺度とは，不変性，劣加法性，単調性，正斉次性の性質を満たすものです．
+% これらの特性は，ある資産 $X$ に関するリスク尺度 $\rho$ で理解することができます．
+% 正斉次性は，データセットが所定の要因で重み付けされるとき，リスク尺度も $ρ\rho(\lambda X = \lambda \rho(X)$ に従って重み付けされるという事実に対応するものです．
+
+はじめは，CVaRに基づくポートフォリオ指標は，非線形計画問題を生じさせるものでした．
+しかし，Uryasev \& Rockafellar (2001)は，この解を線形計画問題に変換する方法を示しました．
+彼らのアプローチの優れた点は，$\mbox{VaR}_\alpha$ を積分の境界から方程式の中に移動させ，最適化問題に新しいパラメータとして追加したことです．
+その結果変換された問題は次にようになります．
+\begin{align*}
+    F(X, VaR) = VaR + \frac{1}{1 - L} \int_{f(w, x) \geq \mbox{\footnotesize VaR}_\alpha(\beta)} (f(w, x) - \mbox{VaR}) p(w, x) dx
+\end{align*}
+これは $F$ を最小化したときの CVaR と透過である．（$\min F = \mbox{CVaR}$）．
+次に，積分境界条件が与えられると，要素 $(f(w, x) - \alpha)$ は正でなければならないことに注意する必要があります．
+したがって，この問題は正の部分のみを考慮すると，より一般的な問題へと変換することができます．
+\begin{align*}
+    VaR + \frac{1}{1 - L} \int_{x} (f(w, x) - \mbox{VaR})^+ p(w, x) dx
+\end{align*}
+
+シナリオ・ベースのポートフォリオは，CVaR を例とするポートフォリオの大きな分類を表しています．
+実際には，シナリオは実際のポートフォリオのリターン，またはモンテカルロ・シミュレーションのようなシミュレーションによって得られたリターンを使って得ることができます．
+積分は，ポートフォリオ収益率 $x_t$ を用いて，次のように近似することができます．
+\begin{align*}
+    \simeq \frac{1}{J} \sum_{j=1}^J (f(w, x) - \mbox{VaR})^+
+\end{align*}
+したがって，プログラミング問題は次のように得られます．
+\begin{align*}
+    \min_{\bm w} \     & \alpha + \frac{1}{(1 - \beta)J} \sum_{j=1}^J z_j, \\
+    \mbox{subject to } & z_j \geq f(w, x_j) - \alpha\\
+                       & z_j \geq 0, \\
+                       & \bm w^\mathsf{T} \hat \mu = \bar x, 
+                       & \bm w^\mathsf{T} \bm 1 = 1, \\
+                       & \bm w \geq 0                 
+\end{align*}
+これに目標収益率，ロング投資のみ，フル投資の条件を加えると，標準的なCVaRポートフォリオ・モデルが得られます．
+CVaR ポートフォリオの線形化は、最適化問題に $J + 1$ 個の追加変数（$\mbox{VaR}_\alpha$ と $z_j$）と $2J$ 個の線形制約を導入することからなります．
+線形計画法を用いると，目的係数は次のようになる．
+\begin{align*}
+    c = \begin{pmatrix}
+        w_1 \\
+        \vdots \\
+        w_N \\
+        \alpha \\
+        z_1 \\
+        \vdots \\ 
+        z_J
+    \end{pmatrix}
+\end{align*}
+したがって，CVaRポートフォリオモデルにおける線形制約の数は，これまで説明した他のモデルよりも感覚的に大きくなってきています．
+未知ベクトルが増え，CVaR問題が線形化されたため，フルインベストメント，ロングオンリー，その他の制約を表現する必要が出てきました．フルインベストメントと目標収益率の等式線形制約は，新しい未知ベクトルに関して，次のようになる．
+\begin{align*}
+    A_{eq} = \begin{pmatrix}
+        1   & \cdots & 1   & 0 & 0 & \cdots & 0 \\
+        w_1 & \cdots & w_n & 0 & 0 & \cdots & 0
+    \end{pmatrix}, 
+    \qquad
+    a_{eq} = \begin{pmatrix}
+        1 \\
+        \bar r
+    \end{pmatrix}
+\end{align*}
+また $A$ は次のようになる．
+\begin{align*}
+    A = \begin{pmatrix}
+        x_{11} & \cdots & x_{1N} & 1      & 1 &        & \\
+        \vdots & \ddots & \vdots & \vdots &   & \ddots & \\
+        x_{J1} & \cdots & x_{JN} & 1      &   &        & 1 \\
+               &        &        &        & 1 &        & \\
+               &        &        &        &   & \ddots & \\
+               &        &        &        &   &        & 1 \\
+        1      &        &        &        &   &        & \\
+               & \ddots &        &        &   &        & \\
+               &        & 1      &        &   &        & \\
+    \end{pmatrix}, 
+    \qquad
+    a = \begin{pmatrix}
+        0 \\
+        \vdots \\
+        0 \\
+        0 \\
+        \vdots \\
+        0 \\
+        0 \\
+        \vdots \\
+        0
+    \end{pmatrix}
+\end{align*}
+ここで欠落している項目は $0$ になります．
+
+行列表現が与えられれば，典型的な線形代数形式を実装して，新しい表現を利用することができます．
+スパースマトリックス用の推奨 R パッケージは，Matrix (Bates \& Maechler (2012))と代替パッケージのslam (Hornik et al. (2013))で，どちらも本章で使用する線形計画パッケージ Rglpk でサポートされています．
+
+\end{document}
